@@ -323,6 +323,14 @@
                 android:orientation="horizontal">
 
                 <TextView
+                    android:id="@+id/btnQuickHdmi"
+                    style="@style/TopButton"
+                    android:text="@string/quick_hdmi"
+                    android:drawableStart="@drawable/ic_input"
+                    android:nextFocusDown="@+id/grid"
+                    android:visibility="gone" />
+
+                <TextView
                     android:id="@+id/btnInputs"
                     style="@style/TopButton"
                     android:text="@string/inputs"

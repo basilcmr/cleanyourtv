@@ -170,6 +170,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     private boolean advancedEffects;
     private TextView greeting;
     private View clockBlock;
+    private TextView btnQuickHdmi;
     private View btnInputs;
     /** config show_inputs_pill: false keeps the Inputs pill hidden even when the TV has inputs. */
     private boolean showInputsPill = true;
@@ -686,8 +687,10 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             }
         }
 
+        btnQuickHdmi = findViewById(R.id.btnQuickHdmi);
         btnInputs = findViewById(R.id.btnInputs);
         View btnSettings = findViewById(R.id.btnSettings);
+        if (btnQuickHdmi != null) btnQuickHdmi.setOnClickListener(v -> openQuickHdmi());
         btnInputs.setOnClickListener(v -> showInputs());
         btnWifi.setOnClickListener(v -> openNetworkPill());
         btnWifi.setOnLongClickListener(v -> {
@@ -751,7 +754,10 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             else makeIconOnly(btnWifi);
             makeIconOnly((TextView) btnSettings);
         }
-        if (cfg.iconOnlyInputs) makeIconOnly((TextView) btnInputs);
+        if (cfg.iconOnlyInputs) {
+            makeIconOnly((TextView) btnInputs);
+            if (btnQuickHdmi != null) makeIconOnly(btnQuickHdmi);
+        }
         btnSettings.setOnLongClickListener(v -> {
             showSettingsMenu();
             return true;
@@ -768,12 +774,15 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
                 focusTile(singleRow ? lastFocused : lastFocused % COLUMNS);
                 return true;
             }
-            int firstButton = btnInputs.getVisibility() == View.VISIBLE ? R.id.btnInputs : firstTopButton().getId();
+            int firstButton = (btnQuickHdmi != null && btnQuickHdmi.getVisibility() == View.VISIBLE)
+                    ? R.id.btnQuickHdmi
+                    : (btnInputs.getVisibility() == View.VISIBLE ? R.id.btnInputs : firstTopButton().getId());
             int leftButton = rtlMenuBar ? R.id.btnSettings : firstButton;
             int rightButton = rtlMenuBar ? firstButton : R.id.btnSettings;
             if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT) return v.getId() == leftButton;
             return keyCode == KeyEvent.KEYCODE_DPAD_RIGHT && v.getId() == rightButton;
         };
+        if (btnQuickHdmi != null) btnQuickHdmi.setOnKeyListener(pillKeys);
         btnInputs.setOnKeyListener(pillKeys);
         btnWifi.setOnKeyListener(pillKeys);
         btnSettings.setOnKeyListener(pillKeys);
@@ -781,7 +790,9 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         btnLibraryTop.setOnKeyListener(pillKeys);
         for (View button : topAppButtons) button.setOnKeyListener(pillKeys);
         if (advancedEffects) {
-            List<View> pills = new ArrayList<>(Arrays.asList(btnInputs, btnWifi, btnReorder, btnLibraryTop, btnSettings));
+            List<View> pills = new ArrayList<>();
+            if (btnQuickHdmi != null) pills.add(btnQuickHdmi);
+            pills.addAll(Arrays.asList(btnInputs, btnWifi, btnReorder, btnLibraryTop, btnSettings));
             pills.addAll(topAppButtons);
             for (View button : pills) {
                 button.setOnFocusChangeListener((view, focused) -> view.animate()
@@ -2282,7 +2293,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         ViewGroup bar = findViewById(R.id.topButtons);
         for (int i = 0; i < bar.getChildCount(); i++) {
             View button = bar.getChildAt(i);
-            if (button != btnInputs && button.getVisibility() == View.VISIBLE) return button;
+            if (button != btnQuickHdmi && button != btnInputs && button.getVisibility() == View.VISIBLE) return button;
         }
         return findViewById(R.id.btnSettings);
     }
@@ -2748,8 +2759,87 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         return SystemSettings.intent(this, standardAction);
     }
 
+    private static final String PREF_LAST_HDMI = "last_hdmi_input_id";
+
+    private void updateQuickHdmiButton() {
+        if (btnQuickHdmi == null) return;
+        String target = findQuickHdmiInputId();
+        if (target == null) {
+            btnQuickHdmi.setVisibility(View.GONE);
+            return;
+        }
+        btnQuickHdmi.setVisibility(View.VISIBLE);
+        String label = getHdmiButtonLabel(target);
+        btnQuickHdmi.setText(label != null && !label.isEmpty() ? label : getString(R.string.quick_hdmi));
+    }
+
+    private String findQuickHdmiInputId() {
+        SharedPreferences prefs = getSharedPreferences(Config.SETTINGS_NAME, MODE_PRIVATE);
+        String last = prefs.getString(PREF_LAST_HDMI, "");
+        TvInputManager tim = (TvInputManager) getSystemService(TV_INPUT_SERVICE);
+        if (tim == null) return null;
+        List<TvInputInfo> inputs;
+        try {
+            inputs = tim.getTvInputList();
+        } catch (RuntimeException e) {
+            return null;
+        }
+        if (inputs == null || inputs.isEmpty()) return null;
+        if (!last.isEmpty()) {
+            for (TvInputInfo info : inputs) {
+                if (info.getId().equals(last) && !info.isHidden(this)) return last;
+            }
+        }
+        TvInputInfo firstHdmi = null;
+        for (TvInputInfo info : inputs) {
+            if (info.getType() == TvInputInfo.TYPE_HDMI && info.isPassthroughInput() && !info.isHidden(this)) {
+                if (firstHdmi == null) firstHdmi = info;
+                try {
+                    if (tim.getInputState(info.getId()) == TvInputManager.INPUT_STATE_CONNECTED) {
+                        return info.getId();
+                    }
+                } catch (RuntimeException ignored) {
+                }
+            }
+        }
+        return firstHdmi != null ? firstHdmi.getId() : null;
+    }
+
+    private String getHdmiButtonLabel(String inputId) {
+        String customStr = getString(R.string.quick_hdmi);
+        if (customStr != null && !customStr.isEmpty() && !customStr.equalsIgnoreCase("HDMI")) {
+            return customStr;
+        }
+        TvInputManager tim = (TvInputManager) getSystemService(TV_INPUT_SERVICE);
+        if (tim == null) return customStr;
+        try {
+            TvInputInfo info = tim.getTvInputInfo(inputId);
+            if (info == null) return customStr;
+            CharSequence custom = InputNames.tidy(info.loadCustomLabel(this));
+            if (custom != null && custom.length() > 0) return custom.toString();
+            CharSequence label = info.loadLabel(this);
+            if (label != null && label.length() > 0) {
+                String s = label.toString();
+                if (!s.toUpperCase(Locale.ROOT).contains("HDMI")) s = "HDMI " + s;
+                return s;
+            }
+        } catch (RuntimeException ignored) {
+        }
+        return customStr;
+    }
+
+    private void openQuickHdmi() {
+        String target = findQuickHdmiInputId();
+        if (target != null) {
+            openInput(target);
+        } else {
+            Toast.makeText(this, R.string.not_available, Toast.LENGTH_SHORT).show();
+        }
+    }
+
     /** Hides the Inputs pill when it would have nothing to list: streaming boxes have no HDMI-in, AV or tuner. */
     private void updateInputsButton() {
+        updateQuickHdmiButton();
         if (!showInputsPill) {
             btnInputs.setVisibility(View.GONE);
             return;
@@ -2857,6 +2947,11 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
      *  throws SecurityException, which used to take Home down with it (YaOS before the manifest asked
      *  for ACCESS_TV_SOURCE). */
     private void openInput(String inputId) {
+        if (inputId != null && (inputId.contains(".hdmi.") || inputId.contains("HDMI"))) {
+            getSharedPreferences(Config.SETTINGS_NAME, MODE_PRIVATE).edit()
+                    .putString(PREF_LAST_HDMI, inputId).apply();
+            updateQuickHdmiButton();
+        }
         // A CEC device is a child input of its HDMI port; the vendor source number belongs to the port
         // (MiTV-MFFU0). Only that lookup uses the parent: the generic path below still opens the child.
         String sourceId = inputId;
