@@ -392,6 +392,23 @@
                 android:scrollbars="none"
                 android:descendantFocusability="afterDescendants" />
         </FrameLayout>
+
+        <!-- Centered bottom pill to toggle AdGuard Private DNS and Default DNS -->
+        <FrameLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingTop="4dp"
+            android:paddingBottom="12dp">
+
+            <TextView
+                android:id="@+id/btnDnsToggle"
+                style="@style/TopButton"
+                android:layout_gravity="center"
+                android:text="AdGuard: ON"
+                android:drawableStart="@drawable/ic_shield"
+                android:focusable="true"
+                android:clickable="true" />
+        </FrameLayout>
     </LinearLayout>
 
     <!-- The single floating glass highlight that springs between tiles. -->

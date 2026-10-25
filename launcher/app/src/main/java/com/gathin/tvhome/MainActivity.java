@@ -172,6 +172,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     private View clockBlock;
     private TextView btnQuickHdmi;
     private View btnInputs;
+    private TextView btnDnsToggle;
     /** config show_inputs_pill: false keeps the Inputs pill hidden even when the TV has inputs. */
     private boolean showInputsPill = true;
     private TextView btnWifi;
@@ -802,6 +803,30 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         }
         if (festive) applyFestiveSkin((TextView) btnInputs, (TextView) btnSettings);
 
+        btnDnsToggle = findViewById(R.id.btnDnsToggle);
+        if (btnDnsToggle != null) {
+            btnDnsToggle.setOnClickListener(v -> togglePrivateDns());
+            btnDnsToggle.setOnFocusChangeListener((v, focused) -> {
+                if (focused) {
+                    hideGlass();
+                    hideHero();
+                }
+                if (advancedEffects) {
+                    v.animate().scaleX(focused ? 1.05f : 1f).scaleY(focused ? 1.05f : 1f)
+                            .setDuration(reducedMotion ? Motion.REDUCED_MS : 160).start();
+                }
+            });
+            btnDnsToggle.setOnKeyListener((v, keyCode, event) -> {
+                if (event.getAction() != KeyEvent.ACTION_DOWN) return false;
+                if (keyCode == KeyEvent.KEYCODE_DPAD_UP) {
+                    focusTile(singleRow ? lastFocused : Math.min(lastFocused, adapter.appCount() - 1));
+                    return true;
+                }
+                return keyCode == KeyEvent.KEYCODE_DPAD_DOWN || keyCode == KeyEvent.KEYCODE_DPAD_LEFT || keyCode == KeyEvent.KEYCODE_DPAD_RIGHT;
+            });
+            updateDnsToggleButton();
+        }
+
         // Hide the glass when focus leaves the tiles.
         getWindow().getDecorView().getViewTreeObserver().addOnGlobalFocusChangeListener((oldF, newF) -> {
             boolean onTile = newF != null && newF.getId() == R.id.card;
@@ -958,6 +983,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         if (openLiveTvAfterBoot()) return;
         updateGreeting();
         updateRace();
+        updateDnsToggleButton();
         // The network and Inputs pills keep their state while Home is in the background, and callbacks update them
         // when the network or the inputs change, so this refresh only catches anything missed. Its binder calls
         // (about 7 ms on a TCL C755, most of it WifiManager.getConnectionInfo) would hold up the first frame back
@@ -2220,7 +2246,12 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             // One row: Up leaves for the top bar, Down has nowhere to go, and Left/Right walk the whole row,
             // stopping at its two ends (the default focus search scrolls the row to the next tile).
             if (keyCode == KeyEvent.KEYCODE_DPAD_UP) return false;
-            if (keyCode == KeyEvent.KEYCODE_DPAD_DOWN) return true;
+            if (keyCode == KeyEvent.KEYCODE_DPAD_DOWN) {
+                if (btnDnsToggle != null && btnDnsToggle.getVisibility() == View.VISIBLE) {
+                    btnDnsToggle.requestFocus();
+                }
+                return true;
+            }
             boolean forward = rtlAppGrid ? keyCode == KeyEvent.KEYCODE_DPAD_LEFT : keyCode == KeyEvent.KEYCODE_DPAD_RIGHT;
             int last = adapter.focusablePosition(count - 1);
             if (forward && position >= last) {
@@ -2248,7 +2279,11 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         } else {
             int lastRowStart = ((count - 1) / COLUMNS) * COLUMNS;
             if (position >= lastRowStart) {
-                if (adapter.isLibraryAt(count)) focusLibrary();
+                if (adapter.isLibraryAt(count)) {
+                    focusLibrary();
+                } else if (btnDnsToggle != null && btnDnsToggle.getVisibility() == View.VISIBLE) {
+                    btnDnsToggle.requestFocus();
+                }
                 return true;
             }
             target = Math.min(position + COLUMNS, count - 1);
@@ -2826,6 +2861,47 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         } catch (RuntimeException ignored) {
         }
         return customStr;
+    }
+
+    private static final String ADGUARD_DNS_HOST = "dns.adguard-dns.com";
+
+    private void updateDnsToggleButton() {
+        if (btnDnsToggle == null) return;
+        try {
+            String mode = Settings.Global.getString(getContentResolver(), "private_dns_mode");
+            String specifier = Settings.Global.getString(getContentResolver(), "private_dns_specifier");
+            boolean isAdGuard = "hostname".equals(mode) && ADGUARD_DNS_HOST.equalsIgnoreCase(specifier);
+            if (isAdGuard) {
+                btnDnsToggle.setText(R.string.dns_adguard_on);
+                btnDnsToggle.setAlpha(1.0f);
+            } else {
+                btnDnsToggle.setText(R.string.dns_default);
+                btnDnsToggle.setAlpha(0.7f);
+            }
+        } catch (Exception e) {
+            btnDnsToggle.setText("DNS");
+        }
+    }
+
+    private void togglePrivateDns() {
+        try {
+            String mode = Settings.Global.getString(getContentResolver(), "private_dns_mode");
+            String specifier = Settings.Global.getString(getContentResolver(), "private_dns_specifier");
+            boolean isAdGuard = "hostname".equals(mode) && ADGUARD_DNS_HOST.equalsIgnoreCase(specifier);
+            if (isAdGuard) {
+                Settings.Global.putString(getContentResolver(), "private_dns_mode", "opportunistic");
+                Toast.makeText(this, R.string.dns_toast_default, Toast.LENGTH_SHORT).show();
+            } else {
+                Settings.Global.putString(getContentResolver(), "private_dns_specifier", ADGUARD_DNS_HOST);
+                Settings.Global.putString(getContentResolver(), "private_dns_mode", "hostname");
+                Toast.makeText(this, R.string.dns_toast_adguard, Toast.LENGTH_SHORT).show();
+            }
+            updateDnsToggleButton();
+        } catch (SecurityException se) {
+            Toast.makeText(this, "Permission required: WRITE_SECURE_SETTINGS", Toast.LENGTH_LONG).show();
+        } catch (Exception e) {
+            Toast.makeText(this, "Failed to toggle DNS: " + e.getMessage(), Toast.LENGTH_SHORT).show();
+        }
     }
 
     private void openQuickHdmi() {
